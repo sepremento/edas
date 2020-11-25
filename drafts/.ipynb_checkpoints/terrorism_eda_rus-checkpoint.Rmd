@@ -1,7 +1,7 @@
 ---
 jupyter:
   jupytext:
-    formats: Rmd,ipynb
+    formats: drafts//Rmd,ipynb
     text_representation:
       extension: .Rmd
       format_name: rmarkdown
@@ -13,23 +13,27 @@ jupyter:
     name: python3
 ---
 
-# Global Terrorism EDA
-_Replica of a fantastic EDA analysis [Terrorist Activities Around The World](https://www.kaggle.com/ash316/terrorism-around-the-world)_
+# Глобальный терроризм
+#### Разведочный анализ данных ####
+Тестовое изменение файла.
 
-The primary goal of this notebook is to get a good understanding of the tendencies underlying the data. Some secondary goals are:
-* To practice plotting and data wrangling
-* To learn how to plot maps and produce animations
+_Значительная доля этого исследования была воссоздана на основе прекрасного исследования [Terrorist Activities Around The World](https://www.kaggle.com/ash316/terrorism-around-the-world)_
 
-```{python _cell_guid="b1076dfc-b9ad-4769-8c92-a6c4dae69d19", _kg_hide-input=TRUE, _uuid="8f2839f25d086af736a60e9eeb907d3b93b6e0e5"}
-# importing necessary libraries
+Основной задачей этого исследования является приобрести понимание тенденций, скрытых в толще массива данных. Вторичными задачами являются:
+* Практика обработки массивов данных и построения графиков.
+* Изучение библиотек работы с картами и анимацией.
+
+```{python _uuid="8f2839f25d086af736a60e9eeb907d3b93b6e0e5", incorrectly_encoded_metadata='_cell_guid="b1076dfc-b9ad-4769-8c92-a6c4dae69d19" _kg_hide-input=true'}
+# загружаем необходимые для работы библиотеки
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
-import folium
+# import folium библиотека folium не входит в стандартную поставку пакета Anaconda, поэтому пока 
+# продолжим без неё
 
-from mpl_toolkits.basemap import Basemap
+# from mpl_toolkits.basemap import Basemap то же самое касается библиотеки Basemap
 from IPython.display import display
 
 import warnings
@@ -37,7 +41,7 @@ import warnings
 warnings.filterwarnings('ignore')
 ```
 
-```{python _cell_guid="79c7e3d0-c299-4dcb-8224-4455121ee9b0", _kg_hide-input=TRUE, _uuid="d629ff2d2480ee46fbb7e2d37f6b5fab8052498a"}
+```{python _uuid="d629ff2d2480ee46fbb7e2d37f6b5fab8052498a", incorrectly_encoded_metadata='_cell_guid="79c7e3d0-c299-4dcb-8224-4455121ee9b0" _kg_hide-input=true'}
 # preparing the data
 data = pd.read_csv('../input/gtd/globalterrorismdb_0718dist.csv', encoding="ISO-8859-1")
 
@@ -60,30 +64,34 @@ terror['Casualties'] = terror['Killed'] + terror['Wounded']
 russia = terror[terror['Country'] == 'Russia']
 ```
 
-`provstate` - province of the country
+## Вопросы относительно данных
 
-## Questioning the Data
+Во-первых, требуется определить, что мы хотим узнать. Большие данные не помогут решить задачу, если мы не представляем, в чём она заключается.
 
-First we need to decide what we would like to know. Having a lot of data is no good if you don't know what you want to get out of it.
-My first inquiry is __whether overall terrorism situation is getting better or worse__, i.e:
+Мой первый вопрос состоит в следующим: __Становится ли обстановка в мире более спокойной или нет__, а именно:
 
-* Do terrorist attacks become more or less frequent?
-* Do average casualties per one terrorist attack get bigger or smaller?
-* Do terrorists attacks per 100,000 population of the world get bigger or smaller?
+* Становятся ли террористические акты чаще или реже?
+* Увеличивается или уменьшается среднее количество жертв в одном террористическом акте?
+* Увеличивается или уменьшается количество террористических актов на 100 000 населения планеты?
 
-The last subquestion seems important to me, because I think it is logical that as the population of the world increases the absolute number of terrorist attacks should also increase. And so if the number of attacks per 100 000 people would decrease but the absolute number would increase, it would still mean that the situation is getting better overall.
+Последний вопрос мне кажется важным, поскольку звучит логично, что абсолютное число террористических актов должно возрастать с ростом населения планеты. И если окажется, что количество терактов на 100 000 населения уменьшается, но при этом абсолютное число терактов растёт, то это всё равно будет свидетельствовать об относительном улучшении ситуации.
 
-My second question is: __What is the distribution of terrorist attacks by casualties. It seems that this distribution should have a fat tail. My prior is that the distribution is lognormal__.
+Второй мой вопрос таков: __Каково распределение терактов по количеству жертв?.__ 
 
-My third question is: What is the distribution of terrorist attacks by country and region.
+Предположительно у этого распределения должен быть длинный хвост. Моё априорное предположение, что распределение будет логнормальным.
 
-* Are there any correlations with population density?
+Третий вопрос таков: __Как выглядит распределение терактов по странам и регионам?__.
 
-My fourth question is: __What are the primary targets of terrorists and are they changing over time?__
+* Существует ли корреляция между плотностью населения и количеством терактов в стране?
 
-To start with let's see, what values are missing in our data:
+И мой четвертый вопрос звучит так: __Каковы основные цели террористов и как они меняются с течением времени?__
 
-```{python _kg_hide-input=TRUE}
+Теперь, после того, как мы определились с вопросами, можно переходить к анализу.
+
+
+Рассмотрим пропуски в наших данных:
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
 n1 = terror.isnull().sum()
 n2 = n1 / terror.shape[0]
 
@@ -94,8 +102,8 @@ miss_df = miss_df.sort_values(by='Missing',ascending=False).round(2)
 display(miss_df[miss_df['Missing']>0].T)
 ```
 
-### Motives and summary
-It seems like most of the time we don't know the motive of the terrorists attacks. And there are a lot of summary missing. But what do we see, when we know them?
+### Мотивы и краткие сводки
+На первый взгляд кажется, что мы в большинстве случаев мы не имеем представления о мотивах террористов. Кроме того, у нас множество пропусков в столбце `summary` (краткая сводка). Однако в тех случаях, где данные всё-таки есть, что можно увидеть?
 
 ```{python}
 motives_df = data['Motive'].value_counts(normalize=True).to_frame().rename(columns={'Motive':'Ratio'})
@@ -104,42 +112,42 @@ motives_df.reset_index(inplace=True, drop=True)
 display(motives_df[['Motive','Ratio']].head())
 ```
 
-This is somewhat interesting. Our data has 72% percent of `Motive` missing and when it is not missing about 60% of the time the "specific motive for the attack is unknown or was not reported". That is very suggestive of the fact that we don't know our enemy at all.
+Это довольно интересно. В данных, которыми мы обладаем, 72% столбца `Motive` (мотив) пустует, а когда данные всё-таки есть, то в 60% случаев в них указывается "specific motive for the attack is unknown or was not reported" (конкретный мотив нападения неизвестен или не указан). Это всерьёз указывает на тот факт, что мы абсолютно не понимаем нашего оппонента.
 
 
-## Basic descriptive exploration
+## Основные параметры
 
-```{python _kg_hide-input=TRUE}
-print('Country with maximum number of attacks: ', terror['Country'].value_counts().index[0])
-print('Region with most number of attacks: ', terror['Region'].value_counts().index[0])
-print('Maximum people killed in an attack are:', terror['Killed'].max(), 
-      'that took place in ',terror.loc[terror['Killed'].idxmax()].Country,
-      'in ', terror.loc[terror['Killed'].idxmax()].Year)
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+print('Страна с наибольшим количеством атак: ', terror['Country'].value_counts().index[0])
+print('Регион с наибольшим количеством атак: ', terror['Region'].value_counts().index[0])
+print('Больше всего людей погибло при атаке:', terror['Killed'].max(), 
+      'которая произошла в ',terror.loc[terror['Killed'].idxmax()].Country,
+      'в ', terror.loc[terror['Killed'].idxmax()].Year)
 print('-'* 40)
 a = terror.loc[(terror['Year'] == 2001) & 
                (terror['Month'] == 9) &
                (terror['Day'] == 11) & 
                (terror['Country'] == 'United States'),'Killed'].max()
 
-print('For comparison during 9-11 there were killed', a)
+print('Можно сравнить с 11 сентября, когда погибли ', a, 'человек')
 print('-'*40)
-print('Most people killed in Russia', russia.loc[russia['Killed'].idxmax()].Day,
+print('В России больше всего погибло', russia.loc[russia['Killed'].idxmax()].Day,
       '-', russia.loc[russia['Killed'].idxmax()].Month,
       '-', russia.loc[russia['Killed'].idxmax()].Year,
-      'when ', russia['Killed'].max(), 
-      'were killed and',russia.loc[russia['Killed'].idxmax()].Wounded, 'were wounded')
+      'когда ', russia['Killed'].max(), 
+      'были убиты и',russia.loc[russia['Killed'].idxmax()].Wounded, 'были ранены')
 ```
 
-### Do terrorist attacks become more or less frequent?
+### Становятся ли теракты чаще или реже?
 
-```{python _kg_hide-input=TRUE}
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
 world_pop = population.groupby(by='Year', as_index=False).sum().rename(columns={'Count':'Population'})
 world_pop = world_pop[(world_pop['Year'] >= 1970) &
                       (world_pop['Year'] <= 2017) &
                       (world_pop['Year'] != 1993)].reset_index(drop=True)
 ```
 
-```{python _kg_hide-input=TRUE}
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
 by_year = terror.groupby(by='Year', as_index=False)['Country'].count().rename(columns={'Country':'Count'})
 by_year['Casualties'] = terror.groupby(by='Year').sum().reset_index()['Casualties']
 by_year = by_year.merge(world_pop, on='Year')
@@ -149,21 +157,22 @@ by_year['CasPerAttack'] = by_year['Casualties'] / by_year['Count']
 display(by_year.head())
 ```
 
-```{python _kg_hide-input=TRUE}
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
 plt.rcParams['patch.force_edgecolor'] = True
 plt.subplots(figsize=(16,14))
 
 plt.subplot(221)
 sns.countplot('Year', data=terror, color='firebrick')
-plt.xticks(rotation=90)
-plt.title('Number Of Terrorist Activities Each Year')
+plt.xlabel('Год')
+plt.ylabel('Количество')
+plt.title('Террористическая активность в зависимости от года')
 plt.xticks(rotation=90)
 
 plt.subplot(222)
 sns.barplot(x='Year', y='Casualties', data=by_year, 
             color='darkorange')
 plt.xticks(rotation=90)
-plt.title('Total Casualties from Terrorist Attacks by Year')
+plt.title('Общее количество жертв терроризма')
 
 plt.subplot(223)
 sns.barplot(x='Year', y='RelCount',data=by_year,
@@ -178,9 +187,9 @@ plt.xticks(rotation=90)
 plt.show()
 ```
 
-Now this is disturbing. Not only the number of attacks is increasing by year but also the frequency and deadliness of these attacks. And what about casualties per one attack during the year?
+Эти графики вызывают тревогу. Мало того, что абсолютное количество терактов и жертв в них растёт с течением времени, так ещё и относительное количество терактов на 100 000 населения планеты увеличивается. А кроме того, увеличивается среднее количество жертв терактов. Что можно сказать о среднем количестве жертв в одном теракте?
 
-```{python _kg_hide-input=TRUE}
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
 cas_distrib = pd.cut(terror['Casualties'], bins=[0, 10, 100, 200, 400, 800, 1600, 3200, 6400, 12800],
                     labels=['0-10','10-100','100-200','200-400','400-800', '800-1600','1600-3200',
                            '3200-6400','6400-12800']).value_counts().sort_index().to_frame()
@@ -200,13 +209,15 @@ f.tight_layout()
 plt.show()
 ```
 
-We can see that there was an increased deadliness of attackd during the 2000s, but then average casualties during one attack went down, which may not be good news since the frequency of attacks more than quintupled since 2001. Also we can see that on a logarithmic scale number of casualties per one terrorist attack is almost linear. This is a distribution with a fat tail. We can make a guess that we have not yet seen the attack from the `12800-25600` bin category.
+Можно увидеть, что среднее количество жертв в в одном теракте достигло своего максимума в середине 2000-х годов, но затем снизилось, однако частота нападений увеличилась более чем в пять раз с 2001 года. Также на диаграмме справа можно увидеть распределение количества жертв в одном теракте в логарифмическом масштабе. По оси $oY$ откложено количество жертв в одном теракте, а по оси $oX$ отложен показатель десятичного логарифма количества терактов с соответствующим количеством жертв. 
+
+Это распределение в логарифмическом масштабе выглядит линейно и действительно, у него длинный хвост. Можно сделать предположение, что мы ещё не сталкивались с терактом из категории `12800-25600`.
 
 
-## Distribution by Region and Country
-My next question is how these activities are distributed across the globe and whether the distribution is changing over time.
+## Распределение по странам и регионам.
+Мо следующий вопрос, как теракты распределены по регионам и меняется ли это распределение с течением времени.
 
-```{python _kg_hide-input=TRUE}
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
 by_region = pd.crosstab(terror['Year'], terror['Region'])
 by_region.plot(kind='bar', stacked=True, width=0.8, colormap='tab20c');
 fig = plt.gcf()
@@ -215,7 +226,7 @@ plt.title("Terrorist Activities Distribution by Region")
 plt.show()
 ```
 
-```{python _kg_hide-input=TRUE}
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
 plt.rcParams['patch.force_edgecolor'] = False
 by_region = pd.crosstab(terror['Year'], terror['Region'], normalize='index')
 by_region.plot(kind='bar', stacked=True, width=1,colormap='tab20c');
@@ -226,7 +237,7 @@ plt.legend(bbox_to_anchor=(1.02, 0.97), loc='upper left', ncol=1)
 plt.show()
 ```
 
-We can see massive increase in terrorist attacks in South Asia since 1980 and although terrorism in the Middle East & North Africa region was always present since 1970 both absolute and relative numbers greatly increased there since 1990s. Another salient region is Sub-Saharan Africa.
+Мы наблюдаем значительное увеличение частоты терактов в Южной Азии с 1980 года. Также, несмотря на то, что терроризм всегда существовал на Ближнем Востоке и в Северной Африке с 1970 года, мы видим рост абсолютных и относительных показателей с 1990-х годов. Другим регионом с большой активностью является [Чёрная Африка](https://ru.wikipedia.org/wiki/Чёрная_Африка)
 
 ```{python}
 by_country = terror.groupby(by=['Year','Country'], as_index=False)['Month'].count()

@@ -1,7 +1,7 @@
 ---
 jupyter:
   jupytext:
-    formats: Rmd,ipynb
+    formats: drafts//Rmd,ipynb
     text_representation:
       extension: .Rmd
       format_name: rmarkdown
@@ -15,6 +15,7 @@ jupyter:
 
 # Глобальный терроризм
 #### Разведочный анализ данных ####
+
 _Значительная доля этого исследования была воссоздана на основе прекрасного исследования [Terrorist Activities Around The World](https://www.kaggle.com/ash316/terrorism-around-the-world)_
 
 Основной задачей этого исследования является приобрести понимание тенденций, скрытых в толще массива данных. Вторичными задачами являются:
