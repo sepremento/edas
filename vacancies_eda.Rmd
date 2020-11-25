@@ -1,0 +1,373 @@
+---
+jupyter:
+  jupytext:
+    formats: Rmd,ipynb
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.5.0
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+```{python}
+from collections import Counter
+import re
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+import nltk
+from nltk.corpus import wordnet
+from nltk.text import Text
+from nltk.text import ConcordanceIndex
+from nltk.probability import FreqDist
+from nltk.stem import WordNetLemmatizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+
+# %pprint
+```
+
+```{python}
+df = pd.read_csv('hh.csv', sep="|")
+# Преобразуем дату и место
+df['Дата публикации'] = df['Дата публикации'].str.replace('Вакансия опубликована ', '')
+df['Дата публикации'] = df['Дата публикации'].str.replace(u'\xa0июля\xa0', '/07/')
+df['Дата публикации'] = df['Дата публикации'].str.replace(u'\xa0июня\xa0', '/06/')
+df[['Дата публикации', 'Место']] = df['Дата публикации'].str.split(' в ', expand=True)
+df['Дата публикации'] = pd.to_datetime(df['Дата публикации'], dayfirst=True)
+# Извлекаем уникальный номер вакансии
+df['id_vacancy'] = df['Ссылка на вакансию'].str.extract(r'/(\d*)\?')
+# Определяем язык описания вакансии:
+rus_symb = df['Описание'].str.count(r'[А-Яа-я]')
+eng_symb = df['Описание'].str.count(r'[A-Za-z]')
+rus_share = rus_symb / (rus_symb + eng_symb)
+df['Язык'] = pd.Series(['ru' if i >= 0.7 else 'en' for i in rus_share])
+df.head(10)
+```
+
+```{python}
+df.groupby('Дата публикации').get_group('2020-07-03').index
+```
+
+```{python}
+stop_words_rus = nltk.corpus.stopwords.words('russian')  # стоп-слова английского
+stop_words_eng = nltk.corpus.stopwords.words('english')  # стоп-слова русского
+```
+
+```{python}
+texts_ru = []
+texts_en = []
+tokens_ru = []
+tokens_en = []
+
+for _, s in df.loc[df['Язык'] == 'ru','Описание'].iteritems():
+    texts_ru.append(s.lower())
+    tokens_ru.extend(nltk.word_tokenize(s.lower()))
+for _, s in df.loc[df['Язык'] == 'en','Описание'].iteritems():
+    texts_en.append(s.lower())
+    tokens_en.extend(nltk.word_tokenize(s.lower()))    
+
+# убираем пунктуацию и стоп-слова у русских текстов
+tokens_ru = [w for w in tokens_ru if w.isalnum()]
+tokens_ru = [w for w in tokens_ru if not w in stop_words_rus]
+
+# у английских текстов
+tokens_en = [w for w in tokens_en if w.isalnum()]
+tokens_en = [w for w in tokens_en if not w in stop_words_eng]
+
+tokens_tot = tokens_en
+tokens_tot.extend(tokens_ru)
+```
+
+```{python}
+tfidf = TfidfVectorizer()
+lemmatizer = WordNetLemmatizer()
+```
+
+```{python}
+texts_en_tokenized = [nltk.word_tokenize(line) for line in texts_en]
+```
+
+```{python}
+def get_wordnet_pos(word):
+    """Map POS tag to first character lemmatize() accepts"""
+    tag = nltk.pos_tag([word])[0][1][0].upper()
+    tag_dict = {"J": wordnet.ADJ,
+                "N": wordnet.NOUN,
+                "V": wordnet.VERB,
+                "R": wordnet.ADV}
+
+    return tag_dict.get(tag, wordnet.NOUN)
+```
+
+```{python}
+texts_en_lemmatized = []
+for line in texts_en_tokenized:
+    texts_en_lemmatized.append([lemmatizer.lemmatize(word, pos=get_wordnet_pos(word)) for word in line])
+```
+
+```{python}
+for i, line in enumerate(texts_en_lemmatized):
+    line = [w for w in line if w.isalnum()]
+    line = [w for w in line if not w in stop_words_eng]
+    texts_en_lemmatized[i] = line
+```
+
+```{python}
+contexts = ConcordanceIndex(tokens_ru)
+```
+
+Метод `ConcordanceIndex.find_concordance` возвращает `namedtuple` списков токенов, окружающих искомое слово
+
+```{python}
+concordance_list = contexts.find_concordance('опыт', width=60)
+```
+
+```{python}
+# создаём объекты Text из nltk, с ними удобнее работать
+descs_ru = Text(tokens_ru)
+descs_en = Text(tokens_en)
+descs_tot = Text(tokens_tot)
+# и тут же создаём частотные словари
+fdist_ru = FreqDist(descs_ru)
+fdist_en = FreqDist(descs_en)
+fdist_tot = FreqDist(descs_tot)
+```
+
+```{python}
+fdist_ru.most_common(50)
+```
+
+```{python}
+fdist_en.most_common(50)
+```
+
+```{python}
+descs_ru.similar('python', 50)
+```
+
+```{python}
+descs_en.similar('python', 50)
+```
+
+```{python}
+descs_tot.similar('data', 50)
+```
+
+```{python}
+skills = ['r','hadoop','docker','aws','spark','c', 'java','python',
+          'sql','pandas','sklearn','matplotlib','numpy', 'apache',
+          'postgre', 'seaborn','pytorch','excel','keras','tidyverse',
+          'ggplot','tensorflow','git','kubernetes', 'catboost',
+          'xgboost','airflow','oracle','scala','nosql','postgresql',
+          'go','unix','tableau','uml','etl','statistics','reporting',
+          'clickhouse', 'elasticsearch','teradata','pyspark', 'opencv']
+```
+
+```{python}
+skills_dict = {k: fdist_tot[k] for k in fdist_tot if k in skills}
+```
+
+```{python}
+skills_s = pd.Series(skills_dict)
+skills_s.sort_values().plot(kind='barh', width=0.8, edgecolor='k',color='salmon', alpha=0.8);
+f = plt.gcf()
+f.set_size_inches(14,13)
+ax = plt.gca()
+ax.set_xlabel('Количество упоминаний')
+plt.savefig('hh_kw.png', dpi=192, bbox_inches='tight')
+```
+
+```{python}
+df.groupby(by='Дата публикации')['id_vacancy'].count().plot(kind='bar', width=0.9)
+f = plt.gcf()
+f.set_size_inches(14, 7)
+plt.show()
+```
+
+```{python}
+pat = re.compile('[А-Яа-я\-]+$')
+locs = []
+for _, i in hh['Дата публикации'].iteritems():
+    locs.extend(re.findall(pat, i))
+locs_count = Counter(locs)
+locs_count.items()
+```
+
+# Вакансии с HeadHunter, EDA v0.2
+
+```{python}
+import re
+import numpy as np
+import pandas as pd
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.set()
+```
+
+```{python}
+df = pd.read_json('vacancies.json')
+df['timestamp'] = df['timestamp'].str.replace('Вакансия опубликована ', '')
+df['timestamp'] = df['timestamp'].str.replace(u'\xa0ноября\xa0', '/08/')
+#df['timestamp'] = df['timestamp'].str.replace(u'\xa0сентября\xa0', '/09/')
+df[['timestamp', 'place']] = df['timestamp'].str.split(' в ', expand=True)
+df['timestamp'] = pd.to_datetime(df['timestamp'], dayfirst=True)
+df.head()
+```
+
+## Анализ тэгов
+К почти каждой вакансии на HeadHunter прилагается поле "Ключевые навыки". В столбце `tags` приведены списки таких полей для каждой вакансии. Любопытно знать, что требуется работодателям из ключевых навыков.
+
+```{python}
+from collections import Counter
+
+MOST_COMMON_TAGS_TO_PLOT = 30
+
+tag_counter = Counter()
+
+for tags_list in df.tags:
+    for tag in tags_list:
+        tag_counter[tag] += 1
+
+plot_data = list(zip(*tag_counter.most_common(MOST_COMMON_TAGS_TO_PLOT)))
+plt.figure(figsize=(10,9))
+plt.barh(y=plot_data[0], width=plot_data[1])
+plt.gca().invert_yaxis()
+plt.title("Наиболее часто встречающиеся тэги в вакансиях на HeadHunter", size=16)
+plt.xlabel("Количество упоминаний")
+plt.savefig('hh_tags_thumb.png', dpi=24, bbox_inches='tight')
+plt.show()
+```
+
+## Опыт работы
+
+```{python}
+plot_data = df.groupby(by='exp').count()['vac_id']
+plt.barh(y=plot_data.index, width=plot_data)
+plt.gca().invert_yaxis()
+plt.title("Распределение требований к опыту работы", size=16)
+plt.xlabel("Количество упоминаний")
+plt.show()
+```
+
+## Зарплаты
+
+```{python}
+def process_salary(salary):
+    assert isinstance(salary, str), "Ожидаем строку, получили не то"
+    try:
+        salary = salary.replace(u'\xa0', u' ')
+        salary = salary.replace('з/п не указана', '')
+
+        if re.findall('^от', salary):
+            salary = re.sub('от\s', '', salary)
+        if re.findall('^до', salary):  # "до" может быть в начале строки
+            salary = re.sub('до\s','', salary)
+        if re.findall('до', salary):  # а может быть в середине
+            salary = re.sub('до\s','-', salary)
+        if re.findall('\s', salary):
+            salary = re.sub('\s', '', salary)
+
+
+        # Обрабатываем беларусские рубли
+        if re.findall('бел. руб.*$', salary):
+            salary = re.sub('бел. руб.*$', '', salary)
+            if re.findall('-', salary):
+                nl1 = int(re.sub('-.*', '', salary))
+                nl2 = int(re.sub('.*-', '', salary))
+                return int(round((nl1 + nl2) * 29.87 / 2))
+            else:
+                return round(int(salary) * 29.87)
+
+        # Обрабатываем рубли
+        if re.findall('руб.', salary):
+            salary = re.sub('руб.*', '', salary)
+            if re.findall('-', salary):
+                nl1 = int(re.sub('-.*', '', salary))
+                nl2 = int(re.sub('.*-', '', salary))
+                return int(round((nl1 + nl2) / 2))
+            else:
+                return int(salary)
+
+        # Обрабатываем доллары
+        if re.findall('USD.$', salary):
+            salary = re.sub('USD.$', '', salary)
+            if re.findall('-', salary):
+                nl1 = int(re.sub('-.*', '', salary))
+                nl2 = int(re.sub('.*-', '', salary))
+                return int(round((nl1 + nl2) * 77 / 2))
+            else:
+                return round(int(salary) * 77)
+
+        if re.findall('KZT.*$', salary):
+            salary = re.sub('KZT.*$', '', salary)
+            if re.findall('-', salary):
+                nl1 = int(re.sub('-.*', '', salary))
+                nl2 = int(re.sub('.*-', '', salary))
+                return int(round((nl1 + nl2) * 0.18 / 2))
+            else:
+                return round(int(salary) * 0.18)
+            
+        salary = ''
+    except ValueError: 
+        print("Ошибочка, продолжаем...")
+        salary = ''
+    
+    if salary == '':
+        salary = None
+    return salary
+    
+    
+
+data = list(map(process_salary, df.salary))
+plot_data = pd.Series(data).dropna()
+plt.hist(plot_data);
+```
+
+```{python}
+
+```
+
+```{python}
+avg = plot_data.mean()
+median = plot_data.median()
+
+print("Среднее: {0:.2f}".format(avg))
+print("Медиана: {0:.2f}".format(median))
+print("Всего значений: {}".format(len(plot_data)))
+```
+
+```{python}
+# %debug
+```
+
+## География
+
+```{python}
+import pymorphy2
+morph = pymorphy2.MorphAnalyzer()
+```
+
+```{python}
+p = morph.parse('Минске')[0]
+p.normal_form
+```
+
+```{python}
+for city in df.place.unique():
+    city = city.split()[0]
+    city = morph.parse(city)[0].normal_form
+    print(city)
+    
+```
+
+```{python}
+
+```

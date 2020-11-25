@@ -1,0 +1,142 @@
+---
+jupyter:
+  jupytext:
+    formats: Rmd,ipynb
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.5.0
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+```{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set()
+```
+
+```{python}
+URL = 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-11-03/ikea.csv'
+init_df = pd.read_csv(URL)
+init_df = init_df.iloc[:, 1:]
+init_df['price_usd'] = 0.27 * init_df['price']
+init_df['price_usd_log'] = np.log1p(init_df['price'])
+init_df.head()
+```
+
+```{python}
+def get_order_by_category(param):
+    return init_df.groupby('category')[param].median().sort_values(ascending=False).index.to_list()
+```
+
+```{python}
+init_df.shape
+```
+
+## График категорий
+
+```{python}
+init_df['category'].value_counts().sort_values(ascending=True).plot(kind='barh')
+fig = plt.gcf()
+fig.set_size_inches(12, 8)
+plt.title("Количество предметов разных категорий")
+plt.show()
+```
+
+```{python}
+order = init_df.groupby('category')['price'].median().sort_values(ascending=False).index.to_list()
+sns.boxplot(data=init_df, x='price_usd_log', y='category', orient='h', order=order);
+fig = plt.gcf()
+fig.set_size_inches(12, 8)
+plt.title('Стоимость предметов из разных категорий каталога IKEA')
+plt.xlabel('Логарифм цены в долларах')
+plt.ylabel('')
+plt.show()
+```
+
+## Объём предметов
+
+```{python}
+init_df['volume'] = init_df['depth'] * init_df['width'] * init_df['height'] / 1000000
+init_df['price_per_m3'] = (init_df['price_usd'] / init_df['volume'])
+init_df['log_price_per_m3'] = np.log1p(init_df['price_per_m3'])
+```
+
+```{python}
+order = get_order_by_category('log_price_per_m3')
+sns.boxplot(data=init_df, y='category', x='log_price_per_m3', orient='h', order=order)
+fig = plt.gcf()
+fig.set_size_inches(12, 8)
+plt.title('Наиболее выгодная покупка с точки зрения доллар на кубометр мебели IKEA')
+plt.xlabel('Логарифм цены за кубический метр')
+plt.ylabel('')
+plt.show()
+```
+
+## Изучаем дизайнеров
+
+```{python}
+from collections import Counter
+designers = Counter()
+for i, designer_list in init_df['designer'].str.split('/').iteritems():
+    for designer in designer_list:
+        if len(designer) < 50:
+            designers[designer] += 1
+```
+
+## Моделирование
+
+```{python}
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.linear_model import Ridge
+```
+
+```{python}
+train_df = init_df.loc[:, ['price_usd', 'volume', 'category']]
+train_df = train_df.dropna()
+train_df.reset_index(inplace=True, drop=True)
+
+encoder = LabelBinarizer()
+transformed = encoder.fit_transform(train_df['category'])
+one_hot_df = pd.DataFrame(transformed, columns=encoder.classes_)
+
+train_df = train_df.merge(one_hot_df, left_index=True, right_index=True)
+train_df.drop('category', axis=1, inplace=True)
+
+train_df.head()
+```
+
+```{python}
+model = Ridge()
+model.fit(train_df.iloc[:, 1:], train_df.iloc[:, 0])
+```
+
+```{python}
+model.coef_
+```
+
+```{python}
+coef_s = pd.Series(model.coef_, index=train_df.iloc[:,1:].columns)
+coef_s = coef_s.sort_values()
+coef_s = coef_s.append(pd.Series(model.intercept_, index=['Intercept']))
+```
+
+```{python}
+coef_s.plot(kind='barh');
+fig = plt.gcf()
+fig.set_size_inches(12, 8)
+plt.title('Важность категорий при оценке стоимости мебели IKEA')
+plt.xlabel('Изменение стоимости при изменении параметра')
+plt.ylabel('')
+plt.show()
+```
+
+```{python}
+
+```

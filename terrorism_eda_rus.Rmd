@@ -1,0 +1,465 @@
+---
+jupyter:
+  jupytext:
+    formats: Rmd,ipynb
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.5.0
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+# Глобальный терроризм
+#### Разведочный анализ данных ####
+_Значительная доля этого исследования была воссоздана на основе прекрасного исследования [Terrorist Activities Around The World](https://www.kaggle.com/ash316/terrorism-around-the-world)_
+
+Основной задачей этого исследования является приобрести понимание тенденций, скрытых в толще массива данных. Вторичными задачами являются:
+* Практика обработки массивов данных и построения графиков.
+* Изучение библиотек работы с картами и анимацией.
+
+```{python _uuid="8f2839f25d086af736a60e9eeb907d3b93b6e0e5", incorrectly_encoded_metadata='_cell_guid="b1076dfc-b9ad-4769-8c92-a6c4dae69d19" _kg_hide-input=true'}
+# загружаем необходимые для работы библиотеки
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import seaborn as sns
+# import folium библиотека folium не входит в стандартную поставку пакета Anaconda, поэтому пока 
+# продолжим без неё
+
+# from mpl_toolkits.basemap import Basemap то же самое касается библиотеки Basemap
+from IPython.display import display
+
+import warnings
+
+warnings.filterwarnings('ignore')
+```
+
+```{python _uuid="d629ff2d2480ee46fbb7e2d37f6b5fab8052498a", incorrectly_encoded_metadata='_cell_guid="79c7e3d0-c299-4dcb-8224-4455121ee9b0" _kg_hide-input=true'}
+# preparing the data
+data = pd.read_csv('../input/gtd/globalterrorismdb_0718dist.csv', encoding="ISO-8859-1")
+
+# we also take some demographics data to see some population density charachteristics
+population = pd.read_csv('../input/world-population-19602018/population_total_long.csv')
+pop_density = pd.read_csv('../input/world-population-19602018/population_density_long.csv')
+
+# make the data a little bit more tidy
+pop_density.rename(columns={'Count': 'Density', 'Country Name':'Country'}, inplace=True)
+data.rename(columns={'iyear':'Year','imonth':'Month','iday':'Day','country_txt':'Country',
+                     'region_txt':'Region','attacktype1_txt':'AttackType','target1':'Target',
+                     'nkill':'Killed','nwound':'Wounded','summary':'Summary','gname':'Group',
+                     'targtype1_txt':'TargetType','weaptype1_txt':'WeaponType','motive':'Motive',
+                     'city':'City', 'latitude':'Latitude','longitude':'Longitude'},
+            inplace=True)
+terror = data[['Year','Month','Day','Country','Region','City','Latitude','Longitude','AttackType',
+               'Killed','Wounded','Target','Summary','Group','TargetType','WeaponType','Motive']]
+
+terror['Casualties'] = terror['Killed'] + terror['Wounded']
+russia = terror[terror['Country'] == 'Russia']
+```
+
+## Вопросы относительно данных
+
+Во-первых, требуется определить, что мы хотим узнать. Большие данные не помогут решить задачу, если мы не представляем, в чём она заключается.
+
+Мой первый вопрос состоит в следующим: __Становится ли обстановка в мире более спокойной или нет__, а именно:
+
+* Становятся ли террористические акты чаще или реже?
+* Увеличивается или уменьшается среднее количество жертв в одном террористическом акте?
+* Увеличивается или уменьшается количество террористических актов на 100 000 населения планеты?
+
+Последний вопрос мне кажется важным, поскольку звучит логично, что абсолютное число террористических актов должно возрастать с ростом населения планеты. И если окажется, что количество терактов на 100 000 населения уменьшается, но при этом абсолютное число терактов растёт, то это всё равно будет свидетельствовать об относительном улучшении ситуации.
+
+Второй мой вопрос таков: __Каково распределение терактов по количеству жертв?.__ 
+
+Предположительно у этого распределения должен быть длинный хвост. Моё априорное предположение, что распределение будет логнормальным.
+
+Третий вопрос таков: __Как выглядит распределение терактов по странам и регионам?__.
+
+* Существует ли корреляция между плотностью населения и количеством терактов в стране?
+
+И мой четвертый вопрос звучит так: __Каковы основные цели террористов и как они меняются с течением времени?__
+
+Теперь, после того, как мы определились с вопросами, можно переходить к анализу.
+
+
+Рассмотрим пропуски в наших данных:
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+n1 = terror.isnull().sum()
+n2 = n1 / terror.shape[0]
+
+miss_df = pd.concat((n1,n2),axis=1)
+miss_df.columns = ['Missing', 'Percentage']
+miss_df = miss_df.sort_values(by='Missing',ascending=False).round(2)
+
+display(miss_df[miss_df['Missing']>0].T)
+```
+
+### Мотивы и краткие сводки
+На первый взгляд кажется, что мы в большинстве случаев мы не имеем представления о мотивах террористов. Кроме того, у нас множество пропусков в столбце `summary` (краткая сводка). Однако в тех случаях, где данные всё-таки есть, что можно увидеть?
+
+```{python}
+motives_df = data['Motive'].value_counts(normalize=True).to_frame().rename(columns={'Motive':'Ratio'})
+motives_df['Motive'] = motives_df.index
+motives_df.reset_index(inplace=True, drop=True)
+display(motives_df[['Motive','Ratio']].head())
+```
+
+Это довольно интересно. В данных, которыми мы обладаем, 72% столбца `Motive` (мотив) пустует, а когда данные всё-таки есть, то в 60% случаев в них указывается "specific motive for the attack is unknown or was not reported" (конкретный мотив нападения неизвестен или не указан). Это всерьёз указывает на тот факт, что мы абсолютно не понимаем нашего оппонента.
+
+
+## Основные параметры
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+print('Страна с наибольшим количеством атак: ', terror['Country'].value_counts().index[0])
+print('Регион с наибольшим количеством атак: ', terror['Region'].value_counts().index[0])
+print('Больше всего людей погибло при атаке:', terror['Killed'].max(), 
+      'которая произошла в ',terror.loc[terror['Killed'].idxmax()].Country,
+      'в ', terror.loc[terror['Killed'].idxmax()].Year)
+print('-'* 40)
+a = terror.loc[(terror['Year'] == 2001) & 
+               (terror['Month'] == 9) &
+               (terror['Day'] == 11) & 
+               (terror['Country'] == 'United States'),'Killed'].max()
+
+print('Можно сравнить с 11 сентября, когда погибли ', a, 'человек')
+print('-'*40)
+print('В России больше всего погибло', russia.loc[russia['Killed'].idxmax()].Day,
+      '-', russia.loc[russia['Killed'].idxmax()].Month,
+      '-', russia.loc[russia['Killed'].idxmax()].Year,
+      'когда ', russia['Killed'].max(), 
+      'были убиты и',russia.loc[russia['Killed'].idxmax()].Wounded, 'были ранены')
+```
+
+### Становятся ли теракты чаще или реже?
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+world_pop = population.groupby(by='Year', as_index=False).sum().rename(columns={'Count':'Population'})
+world_pop = world_pop[(world_pop['Year'] >= 1970) &
+                      (world_pop['Year'] <= 2017) &
+                      (world_pop['Year'] != 1993)].reset_index(drop=True)
+```
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+by_year = terror.groupby(by='Year', as_index=False)['Country'].count().rename(columns={'Country':'Count'})
+by_year['Casualties'] = terror.groupby(by='Year').sum().reset_index()['Casualties']
+by_year = by_year.merge(world_pop, on='Year')
+by_year['RelCount'] = by_year['Count'] / by_year['Population'] * 100000
+by_year['RelCasualties'] = by_year['Casualties'] / by_year['Population'] * 100000
+by_year['CasPerAttack'] = by_year['Casualties'] / by_year['Count']
+display(by_year.head())
+```
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+plt.rcParams['patch.force_edgecolor'] = True
+plt.subplots(figsize=(16,14))
+
+plt.subplot(221)
+sns.countplot('Year', data=terror, color='firebrick')
+plt.xlabel('Год')
+plt.ylabel('Количество')
+plt.title('Террористическая активность в зависимости от года')
+plt.xticks(rotation=90)
+
+plt.subplot(222)
+sns.barplot(x='Year', y='Casualties', data=by_year, 
+            color='darkorange')
+plt.xticks(rotation=90)
+plt.title('Общее количество жертв терроризма')
+
+plt.subplot(223)
+sns.barplot(x='Year', y='RelCount',data=by_year,
+            color='salmon')
+plt.title('Terrorist Attacks per 100 000 people')
+plt.xticks(rotation=90)
+plt.subplot(224)
+sns.barplot(x='Year', y='RelCasualties',data=by_year,
+            color='wheat')
+plt.title('Casualties per 100 000 people')
+plt.xticks(rotation=90)
+plt.show()
+```
+
+Эти графики вызывают тревогу. Мало того, что абсолютное количество терактов и жертв в них растёт с течением времени, так ещё и относительное количество терактов на 100 000 населения планеты увеличивается. А кроме того, увеличивается среднее количество жертв терактов. Что можно сказать о среднем количестве жертв в одном теракте?
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+cas_distrib = pd.cut(terror['Casualties'], bins=[0, 10, 100, 200, 400, 800, 1600, 3200, 6400, 12800],
+                    labels=['0-10','10-100','100-200','200-400','400-800', '800-1600','1600-3200',
+                           '3200-6400','6400-12800']).value_counts().sort_index().to_frame()
+cas_distrib['LogCasualties'] = np.log1p(cas_distrib['Casualties'])
+
+f, (ax1, ax2) = plt.subplots(1, 2, figsize=(14,5), gridspec_kw={'width_ratios': [4,1]})
+
+sns.barplot(x='Year', y='CasPerAttack',data=by_year, ec = 'indigo', color='skyblue', ax=ax1)
+ax1.set_title('Casualties per one Attack')
+ax1.tick_params(axis='x',labelrotation=90)
+
+cas_distrib['LogCasualties'].plot(kind='barh', width=0.9, ec='indigo', color='skyblue', ax=ax2)
+ax2.invert_yaxis()
+ax2.set_title('Logarithmic Distribution of Attacks by Casualties')
+
+f.tight_layout()
+plt.show()
+```
+
+Можно увидеть, что среднее количество жертв в в одном теракте достигло своего максимума в середине 2000-х годов, но затем снизилось, однако частота нападений увеличилась более чем в пять раз с 2001 года. Также на диаграмме справа можно увидеть распределение количества жертв в одном теракте в логарифмическом масштабе. По оси $oY$ откложено количество жертв в одном теракте, а по оси $oX$ отложен показатель десятичного логарифма количества терактов с соответствующим количеством жертв. 
+
+Это распределение в логарифмическом масштабе выглядит линейно и действительно, у него длинный хвост. Можно сделать предположение, что мы ещё не сталкивались с терактом из категории `12800-25600`.
+
+
+## Распределение по странам и регионам.
+Мо следующий вопрос, как теракты распределены по регионам и меняется ли это распределение с течением времени.
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+by_region = pd.crosstab(terror['Year'], terror['Region'])
+by_region.plot(kind='bar', stacked=True, width=0.8, colormap='tab20c');
+fig = plt.gcf()
+fig.set_size_inches(15,7)
+plt.title("Terrorist Activities Distribution by Region")
+plt.show()
+```
+
+```{python incorrectly_encoded_metadata="_kg_hide-input=true"}
+plt.rcParams['patch.force_edgecolor'] = False
+by_region = pd.crosstab(terror['Year'], terror['Region'], normalize='index')
+by_region.plot(kind='bar', stacked=True, width=1,colormap='tab20c');
+fig = plt.gcf()
+fig.set_size_inches(15,7)
+plt.title("Terrorist Activities Distribution by Region")
+plt.legend(bbox_to_anchor=(1.02, 0.97), loc='upper left', ncol=1)
+plt.show()
+```
+
+Мы наблюдаем значительное увеличение частоты терактов в Южной Азии с 1980 года. Также, несмотря на то, что терроризм всегда существовал на Ближнем Востоке и в Северной Африке с 1970 года, мы видим рост абсолютных и относительных показателей с 1990-х годов. Другим регионом с большой активностью является [Чёрная Африка](https://ru.wikipedia.org/wiki/Чёрная_Африка)
+
+```{python}
+by_country = terror.groupby(by=['Year','Country'], as_index=False)['Month'].count()
+by_country.rename(columns={'Month':'Count'},inplace=True)
+by_country = by_country[['Country','Year','Count']]
+
+merged_df = pop_density.merge(by_country, on=['Country','Year'])
+```
+
+```{python}
+plt.scatter(x=merged_df.loc[merged_df['Year']==2014,'Density'],
+            y=merged_df.loc[merged_df['Year']==2014,'Count']);
+```
+
+```{python}
+cas_yearly_rus = russia.groupby(by='Year', as_index=False)['Casualties'].sum()
+
+plt.subplots(figsize=(18,6))
+
+plt.subplot(121)
+sns.countplot('Year', data=russia, color='salmon', edgecolor='k')
+plt.xticks(rotation=90)
+plt.title('Number Of Terrorist Activities Each Year in Russia')
+
+plt.subplot(122)
+sns.barplot(x='Year', y='Casualties', data=cas_yearly_rus, 
+        color='darkorange', edgecolor='black')
+plt.xticks(rotation=90)
+plt.title('Casualties from Terrorist Activities by Year in Russia')
+plt.show()
+```
+
+Yes, we can see that the number of terrorist activities have gone up after 2000. Though it may be the case, that the number of attacks increases, but the total number of casualties decreases. Let's plot and check this out.
+
+```{python}
+plt.subplots(figsize=(18,6))
+plt.subplot(121)
+sns.countplot('AttackType', data=terror, palette='inferno',
+              order=terror['AttackType'].value_counts().index)
+plt.xticks(rotation=90)
+plt.title('Terrorists` Methods of Attack')
+
+plt.subplot(122)
+sns.countplot('AttackType', data=russia, palette='inferno',
+              order=russia['AttackType'].value_counts().index)
+plt.xticks(rotation=90)
+plt.title('Terrorists` Methods of Attack in Russia')
+plt.show()
+```
+
+```{python}
+m3 = Basemap(projection='mill', llcrnrlat=-80, urcrnrlat=80, llcrnrlon=-180, urcrnrlon=180,
+            lat_ts=20, resolution='c', lat_0=True, lat_1=True)
+long_100 = list(terror[terror['Casualties']>=75]['Longitude'])
+lat_100 = list(terror[terror['Casualties']>=75]['Latitude'])
+x_100, y_100 = m3(long_100, lat_100)
+m3.plot(x_100, y_100, 'go', markersize=5, color='r')
+
+long_ = list(terror[terror['Casualties']<75]['Longitude'])
+lat_ = list(terror[terror['Casualties']<75]['Latitude'])
+x_, y_ = m3(long_, lat_)
+m3.plot(x_, y_, 'go', markersize=1, color='navy', alpha=0.2)
+
+m3.drawcoastlines()
+m3.drawcountries()
+m3.fillcontinents(lake_color='lightskyblue')
+m3.drawmapboundary(fill_color='lightskyblue')
+
+fig = plt.gcf()
+fig.set_size_inches(14,7)
+plt.title('Global Terrorist Attacks')
+plt.legend(loc='lower left', handles=[mpatches.Patch(color='navy', label="<75 casualties"),
+                                      mpatches.Patch(color='r', label=">75 casualties")])
+plt.show()
+
+```
+
+```{python}
+terror_fol = terror.copy()
+terror_fol.dropna(subset=['Latitude','Longitude'], inplace=True)
+terror_fol.sort_index(ascending=False, inplace=True)
+location_fol = terror_fol[['Latitude','Longitude']][:1000]
+country_fol = terror_fol['Country'][:1000]
+city_fol = terror_fol['City'][:1000]
+year_fol = terror_fol['Year'][:1000]
+month_fol = terror_fol['Month'][:1000]
+day_fol = terror_fol['Day'][:1000]
+killed_fol = terror_fol['Killed'][:1000]
+wound_fol = terror_fol['Wounded'][:1000]
+
+def color_point(x):
+    if x>=30: color = 'red'
+    elif ((x>0 and x<30)): color = 'blue'
+    else: color = 'green'
+    
+    return color
+
+def point_size(x):
+    if (x>30 and x<100): size = 2
+    elif (x>=100 and x<500): size = 8
+    elif x>=500: size = 16
+    else: size = 0.5
+        
+    return size
+
+map_fol = folium.Map(location=[30,0], tiles='CartoDB dark_matter', zoom_start=2)
+for point in location_fol.index:
+    info = '<b>Country: </b>' + str(country_fol[point]) + \
+           '<br><b>City: </b>' + str(city_fol[point]) + \
+           '<br><b>Date: </b>' + str(year_fol[point]) + \
+                           '-' + str(month_fol[point]) + \
+                           '-' + str(day_fol[point]) + \
+           '<br><b>Killed: </b>' + str(killed_fol[point]) + \
+           '<br><b>Wounded: </b>' + str(wound_fol[point])
+    iframe = folium.IFrame(html=info, width=200, height=200)
+    folium.CircleMarker(list(location_fol.loc[point].values),
+                       popup = folium.Popup(iframe),
+                       radius = point_size(killed_fol[point]),
+                       color = color_point(killed_fol[point])).add_to(map_fol)
+    
+map_fol
+```
+
+```{python}
+plt.subplots(figsize=(15,6))
+sns.countplot('Region', data=terror, palette='RdYlGn', edgecolor=sns.color_palette('dark',7),
+              order = terror['Region'].value_counts().index)
+plt.xticks(rotation=90)
+plt.title('Number Of Terrorist Activities by Region')
+plt.show()
+```
+
+```{python}
+terror_region = pd.crosstab(terror['Year'], terror['Region'])
+terror_region.plot(color=sns.color_palette('Set2', 12))
+fig=plt.gcf()
+fig.set_size_inches(18,6)
+plt.show()
+```
+
+```{python}
+cross_tab_exp = pd.crosstab(terror['Year'],terror['Region'], 
+                            values=terror['Casualties'], aggfunc='sum',
+                           margins='Total')
+cross_tab_exp.head()
+```
+
+```{python}
+pd.crosstab(terror.Region, terror.AttackType).plot.barh(stacked=True, width=1, 
+                                                        color=sns.color_palette('RdYlGn', 9))
+fig = plt.gcf()
+fig.set_size_inches(12,8)
+plt.show()
+```
+
+```{python}
+plt.subplots(figsize = (18,6))
+sns.barplot(terror['Country'].value_counts().index[:15],
+            terror['Country'].value_counts().values[:15],
+            palette='inferno')
+plt.title('Top Affected Countries')
+plt.show()
+```
+
+```{python}
+coun_terror = terror['Country'].value_counts()[:15].to_frame()
+coun_terror.columns = ['Attacks']
+coun_kill = terror.groupby('Country')['Killed'].sum().to_frame()
+coun_terror.merge(coun_kill, left_index=True, right_index=True, how='left').plot.bar(width=0.9)
+fig = plt.gcf()
+fig.set_size_inches(18,6)
+plt.show()
+```
+
+```{python}
+sns.barplot(terror['Group'].value_counts()[1:15].values, 
+            terror['Group'].value_counts()[1:15].index,
+            palette=('inferno'))
+plt.xticks(rotation=90)
+fig = plt.gcf()
+fig.set_size_inches(10, 8)
+plt.title('Terrorist Groups with Highest Terror Attacks')
+plt.show()
+```
+
+```{python}
+top_groups10 = terror[terror['Group'].isin(terror['Group'].value_counts()[1:11].index)]
+pd.crosstab(top_groups10['Year'],top_groups10['Group']).plot(color=sns.color_palette('Paired', 10))
+fig = plt.gcf()
+fig.set_size_inches(18,6)
+plt.show()
+```
+
+```{python}
+russia_fol = russia.copy()
+russia_fol.dropna(subset=['Latitude','Longitude'],inplace=True)
+russia_fol.sort_index(ascending=False, inplace=True)
+
+location_rus = russia_fol[['Latitude','Longitude']][:1000]
+city_rus = russia_fol['City'][:1000]
+year_rus = russia_fol['Year'][:1000]
+month_rus = russia_fol['Month'][:1000]
+day_rus = russia_fol['Day'][:1000]
+killed_rus = russia_fol['Killed'][:1000]
+wound_rus = russia_fol['Wounded'][:1000]
+target_rus = russia_fol['TargetType'][:1000]
+
+map_rus = folium.Map(location=[55.75, 37.62], tiles='CartoDB dark_matter', zoom_start=3)
+for point in location_rus.index:
+    info = '<br><b>City: </b>' + str(city_rus[point]) + \
+           '<br><b>Date: </b>' + str(year_rus[point]) + \
+                           '-' + str(month_rus[point]) + \
+                           '-' + str(day_rus[point]) + \
+           '<br><b>Killed: </b>' + str(killed_rus[point]) + \
+           '<br><b>Wounded: </b>' + str(wound_rus[point]) + \
+           '<br><b>Target: </b>' + str(target_rus[point])
+    iframe = folium.IFrame(html=info, width=200, height=200)
+    folium.CircleMarker(list(location_rus.loc[point].values),
+                       popup = folium.Popup(iframe),
+                       radius = point_size(killed_rus[point]),
+                       color = color_point(killed_rus[point])).add_to(map_rus)
+map_rus
+```
+
+```{python}
+
+```

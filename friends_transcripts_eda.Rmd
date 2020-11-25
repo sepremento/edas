@@ -1,0 +1,119 @@
+---
+jupyter:
+  jupytext:
+    formats: Rmd,ipynb
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.5.0
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+```{python}
+import re
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from scipy.stats import ttest_ind
+```
+
+```{python}
+friends_csv = 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-08/friends.csv'
+friends_emotions_csv ='https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-08/friends_emotions.csv'
+friends_info_csv = 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-08/friends_info.csv'
+```
+
+```{python}
+friends_df = pd.read_csv(friends_csv)
+emotions_df = pd.read_csv(friends_emotions_csv)
+episodes_df = pd.read_csv(friends_info_csv)
+```
+
+```{python}
+friends_df.head()
+```
+
+```{python}
+emotions_df.head()
+```
+
+```{python}
+episodes_df.head()
+```
+
+```{python}
+plt.figure(figsize=(18, 7))
+plt.scatter(episodes_df.index, episodes_df['us_views_millions'], c=episodes_df['season'])
+ax = plt.gca()
+for i, txt in enumerate(episodes_df['title']):
+    ax.annotate(txt, (episodes_df.index[i], episodes_df.loc[i, 'us_views_millions']), fontsize=5)
+plt.show()
+```
+
+## Режиссёры
+
+```{python}
+directors = episodes_df.groupby('directed_by').agg({'episode': 'count', 'imdb_rating': 'mean'})
+directors = directors.rename(columns={'episode': 'episodes', 'imdb_rating': 'avg_rating'})
+directors = directors.sort_values('episodes', ascending=False)
+directors.head(10)
+```
+
+Видно, что есть два режиссёра, которые сняли больше всего эпизодов сериала - Гэри Халворсон и Кевин Брайт. Средние рейтинги этих режиссёров на IMDB отличаются на 0.2 балла. Любопытно, является ли эта разница статистически значимой?
+
+```{python}
+gary_halvorson = episodes_df.loc[episodes_df['directed_by'] == 'Gary Halvorson', 'imdb_rating']
+kevin_bright = episodes_df.loc[episodes_df['directed_by'] == 'Kevin S. Bright', 'imdb_rating']
+tstat, pvalue = ttest_ind(gary_halvorson, kevin_bright)
+print("t-статистика: {:.2f}".format(tstat), "\nУровень значимости: {:.2f}%".format(pvalue*100))
+```
+
+Мы отвергаем нулевую гипотезу равенства средних рейтингов двух режиссёров и можем считать статистически значимой разницу в их результатах. Можно сказать, что эпизоды Кевина Брайта больше нравятся зрителям IMDB
+
+
+## Сценаристы
+
+```{python}
+import re
+
+name = 'CamelCaseTest123'
+splitted = re.sub('([A-Z][a-z]+)', r' \1', re.sub('([A-Z]+)', r' \1', name)).split()
+splitted
+```
+
+```{python}
+# ?pd.DataFrame.str.sub()
+```
+
+```{python}
+writers = []
+
+pat = r'([A-Z]+[a-z]{3,20})([A-Z]+[a-z]{3,20})'
+repl = lambda m: " & ".join((m.group(1), m.group(2)))
+
+writers_series = episodes_df['written_by']
+writers_series = writers_series.str.replace(u'Teleplay by\u200a:', u' & ')
+writers_series = writers_series.str.replace(u'Story by\u200a: ', u'')
+writers_series = writers_series.str.replace(r'\n', ' ')
+writers_series = writers_series.str.replace(pat, repl)
+writers_series = writers_series.str.split(" & ")
+
+writers.extend(li for li in writers_series)
+writers = set([writer for episode_writers in writers for writer in episode_writers])
+writers
+```
+
+```{python}
+[li for li in episodes_df['written_by'].str.split("&")]
+```
+
+```{python}
+
+```

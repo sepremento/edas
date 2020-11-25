@@ -1,0 +1,327 @@
+---
+jupyter:
+  jupytext:
+    formats: Rmd,ipynb
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.5.0
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+```{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import nltk
+
+import requests
+import networkx as nx
+import os
+import re
+import pickle
+from bs4 import BeautifulSoup
+from itertools import combinations
+
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import ShuffleSplit
+
+import scipy.sparse as sp
+from sklearn.feature_extraction.text import CountVectorizer
+```
+
+# Исследование отзывов на супы быстрого приготовления
+Источником данных для этой работы послужил рейтинг с сайта [The Ramen Rater](https://www.theramenrater.com/resources-2/the-list/), содержащий более 3500 отзывов на супы рамен в разных формах. Каждому отзыву соответствует рейтинг по пятибалльной шкале, указана страна изготовления, стиль приготовления блюда, бренд и название товара.
+
+```{python}
+URL = "https://www.theramenrater.com/resources-2/the-list/"
+```
+
+```{python}
+if os.path.exists('ramen_reviews.json'):
+    review_df = pd.read_json('ramen_reviews.json')
+    print("Скачивание датасета уже производилось, переходи к обработке")
+```
+
+## Извлечение данных
+
+```{python}
+# Достаём список ссылок
+resp = requests.get(URL)
+soup = BeautifulSoup(resp.content, 'html.parser')
+links_taglist = soup.select("#myTable a")
+links_list = []
+for link_tag in links_taglist:
+    link = link_tag['href']
+    links_list.append(link)
+```
+
+Получим все отзывы, какие удастся.
+
+```{python jupyter={'outputs_hidden': True}}
+session = requests.Session()
+paragraphs_list = []
+for link in links_list:
+    try:
+        resp = session.get(link)
+        print("Обрабатываю: {}".format(link))
+        soup = BeautifulSoup(resp.content, 'html.parser')
+        title = soup.select('.entry-title')
+        paragraphs = soup.select('.entry-content > p')
+        paragraphs_list.append({'title': title,
+                                'paragraphs': paragraphs})
+    except (HTTPError, MissingSchema):
+        print("Ошибка обработки URL")
+        continue
+print("Успешно закончили!")
+```
+
+```{python}
+print("Получили текстов отзывов: {}".format(len(paragraphs_list)))
+```
+
+Напишем функцию, которая из указанных текстов будет извлекать тексты абзацев с итоговым впечатлениям, по которому можно будет составить представление о настроении отзыва.
+
+```{python}
+def get_sentiment_relevant_text(review_dict):
+    """Достать из списка тэгов кусочек текста, который имеет отношение к 
+    настроению отзыва.
+    Аргументы:
+        tag_list (list) - список тэгов, из которых нужно вытащить текст.
+    Возвращает:
+        output (dict) - Словарь содержимого отзыва: номер отзыва, текст отзыва,
+            код и тип кода.
+    """
+    num_text = review_dict['title'][0].get_text()
+    try:
+        num_review = re.search("\d+", num_text).group(0)
+    except AttributeError:
+        return
+    text_list = [tag.get_text() for tag in review_dict['paragraphs']]
+    text_list = [text for text in text_list if 'Finished' in text]
+    
+    if text_list:
+        pattern = re.compile("(Finished.*?\.)(.*)")
+        review_groups = re.match(pattern, text_list[0])
+        try:
+            review = review_groups.group(2).strip()
+        except AttributeError:
+            return
+        return {'Review #': num_review,
+                'Review Content': review}
+```
+
+```{python}
+review_texts_list = list(map(get_sentiment_relevant_text, paragraphs_list))
+review_texts_list = [i for i in review_texts_list if i]
+```
+
+```{python}
+raw, = pd.read_html(URL, flavor='bs4', attrs={'id': 'myTable'})
+raw.head()
+```
+
+```{python}
+review_content_df = pd.DataFrame(review_texts_list)
+review_content_df.head()
+```
+
+```{python}
+review_df = raw.merge(review_content_df, on='Review #', how='inner')
+review_df = review_df.drop('T', axis=1)
+review_df['Review #'] = review_df['Review #'].astype(np.int32)
+review_df.head()
+```
+
+Сохраним получившиеся данные в файл
+
+```{python}
+review_dict = review_df.to_dict()
+with open('ramen_reviews.json', 'w') as f:
+    json.dump(review_dict, f)
+```
+
+## Обработка
+
+```{python}
+top_20_brands = review_df['Brand'].value_counts()[:20].index.to_list()
+top_4_styles = review_df['Style'].value_counts()[:4].index.to_list()
+top_12_countries = review_df['Country'].value_counts()[:12].index.to_list()
+```
+
+```{python}
+lumped_df = review_df.copy()
+lumped_df['Stars'] = pd.to_numeric(lumped_df['Stars'], errors='coerce')
+lumped_df['Brand'] = [i if i in top_20_brands else 'Other' for i in lumped_df['Brand']]
+lumped_df['Style'] = [i if i in top_4_styles else 'Other' for i in lumped_df['Style']]
+lumped_df['Country'] = [i if i in top_12_countries else 'Other' for i in lumped_df['Country']]
+lumped_df = lumped_df.dropna()
+```
+
+```{python}
+long_df = pd.melt(lumped_df.loc[:,'Brand':'Country'], var_name='category')
+group_counts = long_df.groupby(['category', 'value']).size()
+group_counts = group_counts.groupby(level=0, group_keys=False).nlargest(16)
+```
+
+```{python}
+fig, ax = plt.subplots(2, 2)
+ax = ax.reshape(-1)
+fig.set_size_inches((14, 10))
+fig.suptitle('Категориальные предикторы (после обработки)', size=16)
+for i, category in enumerate(group_counts.index.levels[0]):
+    group_counts[category].plot(kind='barh', ax=ax[i], width=0.8)
+    ax[i].invert_yaxis()
+    ax[i].set_ylabel('')
+    ax[i].set_title(category)
+fig.tight_layout()
+```
+
+```{python}
+model_df = pd.get_dummies(lumped_df.loc[:,['Brand','Country','Style']])
+model_df.insert(0, 'Stars', lumped_df['Stars'])
+model_df = model_df.reset_index(drop=True)
+```
+
+```{python}
+ss = ShuffleSplit(n_splits=20, train_size=0.9)
+linmodel = Ridge()
+
+coefs = []
+intercept = []
+for train_split, test_split in ss.split(model_df.iloc[:, 1:], model_df.iloc[:, 0]):
+    linmodel.fit(model_df.iloc[train_split, 1:], model_df.iloc[train_split, 0])
+    coefs.append(linmodel.coef_)
+    intercept.append(linmodel.intercept_)
+
+coefs_arr = np.array(coefs)
+means = coefs_arr.mean(axis=0)
+stds = coefs_arr.std(axis=0)
+
+intercept_arr = np.array(intercept)
+intercept = intercept_arr.mean()
+intercept_std = intercept_arr.std()
+```
+
+```{python}
+features = model_df.columns[1:].to_list()
+coefs_df = pd.DataFrame({'Признак': features,
+                         'Коэффициент': means,
+                         'Стандартное отклонение': stds,
+                         'error': 2 * stds})
+coefs_df = coefs_df.sort_values(by='Коэффициент', ascending=False)
+coefs_df = coefs_df.reset_index(drop=True)
+coefs_df[['Категория', 'Признак']] = coefs_df['Признак'].str.split("_", expand=True)
+```
+
+```{python}
+print("Базовый уровень: {0:.3f}±{1:.3f}".format(intercept, 2*intercept_std))
+```
+
+```{python}
+colors = ['firebrick', 'darkgreen', 'C0']
+fig, ax = plt.subplots(3, 1, sharex=True)
+fig.set_size_inches((10, 14))
+for i, category in enumerate(coefs_df['Категория'].unique()):
+    plot_data = coefs_df.loc[coefs_df['Категория'] == category, :].sort_values("Коэффициент")
+    ax[i].errorbar(plot_data.loc[:, "Коэффициент"], plot_data.loc[:, "Признак"], 
+                   xerr=plot_data.loc[:, "error"], marker='o', ls='', elinewidth=0.5,
+                  capsize=2, color=colors[i])    
+    ax[i].axvline(color="k", ls='--', lw=0.8)
+    ax[i].xaxis.set_tick_params(labelbottom=True)
+```
+
+```{python}
+review_tokens_df = review_df.copy()
+stop_words = nltk.corpus.stopwords.words('english')
+review_tokens_df['Review Content'] = [nltk.word_tokenize(review.lower()) 
+                                      for review in review_tokens_df['Review Content']]
+review_tokens_df['Review Content'] = (review_tokens_df['Review Content']
+                                      .map(lambda tokens: [token for token in tokens
+                                                           if re.search("[a-z]", token)
+                                                           if token not in stop_words]))
+review_tokens_df['Stars'] = pd.to_numeric(review_tokens_df['Stars'], errors='coerce')
+review_tokens_df = review_tokens_df.dropna().reset_index(drop=True)
+review_tokens_df.head()
+```
+
+```{python}
+review_tokens_df_exploded = review_tokens_df.explode('Review Content')
+review_tokens_df_exploded = review_tokens_df_exploded.rename(columns={'Review Content': 'Word'})
+review_tokens_df_exploded.head()
+```
+
+```{python}
+review_words = (review_tokens_df_exploded.groupby('Word', as_index=False)
+                .agg({'Review #': 'count', 'Brand': 'nunique', 'Stars': 'mean'})
+                .sort_values('Review #', ascending=False)
+                .rename(columns={'Review #': 'n', 'Brand': 'n_distinct', 'Stars': 'avg_rating'}))
+```
+
+```{python}
+# слова часто употребимые с одной стороны, но и не повсеместные
+review_words_filtered = review_words.loc[(review_words['n_distinct'] <= 400) &
+                                         (review_words['n_distinct'] >= 20),:]
+review_words_filtered = review_words_filtered.reset_index(drop=True)
+review_words_filtered
+```
+
+```{python}
+vectorizer = CountVectorizer(stop_words=stop_words, tokenizer=nltk.word_tokenize)
+term_doc_matrix = vectorizer.fit_transform(review_df['Review Content'])
+indices = [vectorizer.vocabulary_[word] for word in review_words_filtered['Word']]
+cooc_matrix = (term_doc_matrix.T * term_doc_matrix)
+cooc_matrix = cooc_matrix / cooc_matrix.diagonal()
+cooc_arr = np.array(cooc_matrix)
+cooc_arr = cooc_arr[indices]
+cooc_arr = cooc_arr[:, indices]
+cooc_df = pd.DataFrame(cooc_arr, index=review_words_filtered['Word'], columns=review_words_filtered['Word'])
+```
+
+```{python}
+word_pairs = pd.DataFrame(combinations(review_words_filtered['Word'],2))
+word_pairs = word_pairs.rename(columns={0: 'WordA', 1: 'WordB'})
+word_pairs['Occurence'] = [cooc_df.loc[j, i] for i, j in zip(word_pairs['WordA'], word_pairs['WordB'])]
+word_pairs = word_pairs.merge(review_words_filtered, left_on='WordA', right_on='Word')
+word_pairs = word_pairs[['WordA', 'WordB', 'Occurence', 'avg_rating']]
+word_pairs = word_pairs.sort_values('Occurence', ascending=False)
+word_pairs = word_pairs.iloc[:300].reset_index(drop=True)
+word_pairs
+```
+
+```{python}
+graph = nx.from_pandas_edgelist(word_pairs, source='WordA', target='WordB', 
+                                edge_attr=['Occurence', 'avg_rating'])
+color_code = []
+node_size = []
+for node in graph:
+    for _, x in word_pairs.iterrows():
+        if x.WordA == node:
+            color_code.append(x.avg_rating)
+            node_size.append(x.Occurence*130)
+            break
+        elif x.WordB == node:
+            color_code.append(x.avg_rating)
+            node_size.append(x.Occurence*130)
+            break
+        else:
+            continue
+
+plt.figure(figsize=(14,12))
+pos = nx.spring_layout(graph, k=0.5)
+nx.draw(graph, pos, node_color=color_code, node_size=node_size, cmap=plt.cm.RdYlGn, width=1,
+       style='dashed', edge_color='0.8')
+for p in pos:  # raise text positions
+    pos[p][1] += 0.02
+nx.draw_networkx_labels(graph, pos)
+plt.show()
+```
+
+```{python}
+
+```
