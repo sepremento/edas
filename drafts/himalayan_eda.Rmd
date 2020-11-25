@@ -13,6 +13,8 @@ jupyter:
     name: python3
 ---
 
+# Экспедиции в Гималаи
+
 ```{python}
 import numpy as np
 import pandas as pd
@@ -47,6 +49,15 @@ peaks_df = pd.read_csv(peaks_csv)
 ```
 
 ## Предварительная подготовка данных
+
+
+Вначале проведём некоторую подготовительную работу, чтобы привести данные в удобный для последующего анализа вид. Разобьём результаты экспедиций на три категории: "успех" (Success), "неудача" (Failure) и "другое" (Other). В группу другое включим те результаты экспедиций, успешность которых неочевидна. К таким результатам относятся, например: Unknown (неизвестно), Attempt rumoured (неподтверждённая попытка восхождения), Did not attempt climb (попытка восхождения так и не предпринята), Did not reach base camp (группа не подходила к базовому лагерю).
+
+Кроме того сделаем некоторые косметические изменения в данных, такие как:
+* Переобозначим метры с европейского написания на американское `metres` -> `meters`
+* Обработаем даты в полях `basecamp_date`, `highpoint_date`, `termination_date`, превратим их из текстового формата в формат `datetime`.
+* Создадим новое поле `days_to_highpoint` (количество дней на восхождение).
+* Превратим поля `season` и `success` в категориальный формат.
 
 ```{python}
 def decide_mission_success(x):
@@ -84,7 +95,7 @@ colors = {'Climbed': '#81a868', 'Unclimbed': 'firebrick'}
 plt.figure(figsize=(10, 9))
 bars = plt.barh(y=plot_data['peak_name'],width=plot_data['height_meters'],
          color=[colors[i] for i in plot_data['climbing_status']])
-plt.legend((bars[0], bars[4]), ("Покорённые", "Непокорённые"))
+plt.legend((bars[0], bars[4]), ("Покорённые", "Непокорённые"), loc='upper left')
 plt.xlabel("Высота, м")
 plt.title("Самые высокие вершины в Гималаях")
 plt.show()
@@ -98,16 +109,21 @@ plt.show()
 ```{python}
 plot_df = expeditions_df.copy()
 plot_df = plot_df.dropna(subset=['days_to_highpoint', 'peak_name'])
-top10 = (plot_df.groupby('peak_name').count()
+top10 = (plot_df
+         .groupby('peak_name')
+         .count()
          .sort_values('expedition_id', ascending=False)[:10]
          .index.to_list())
-plot_df = plot_df.loc[(plot_df['success'] == 'Success') & 
-                      (plot_df['peak_name'].isin(top10))]
-order = (plot_df.groupby('peak_name')['days_to_highpoint']
-        .median().sort_values(ascending=False).index.to_list())
+plot_df = plot_df.loc[(plot_df['success'] == 'Success') & (plot_df['peak_name'].isin(top10))]
+order = (plot_df
+         .groupby('peak_name')['days_to_highpoint']
+         .median()
+         .sort_values(ascending=False)
+         .index
+         .to_list())
 
 plt.figure(figsize=(10, 9))
-sns.boxplot(data=plot_df, x='days_to_highpoint', y='peak_name', orient='h', order=order)
+sns.boxplot(data=plot_df, x='days_to_highpoint', y='peak_name', orient='h', order=order, zorder=100)
 plt.grid(ls='--', zorder=0)
 plt.xlabel("Время подъёма от лагеря до вершины, дней")
 plt.ylabel("")
@@ -160,21 +176,23 @@ peaks_summary_df[['cred_low', 'cred_high']] = ([beta.interval(0.9, a+i, b+j-i)
 ```
 
 ```{python}
-peaks_summary_df
-```
-
-```{python}
 plt.figure(figsize=(10,9))
-dots = plt.scatter(x=peaks_summary_df['pct_death'], y=peaks_summary_df['fitted'],
-            c=peaks_summary_df['members'], alpha=0.5,
-            s=20*np.log10(peaks_summary_df['members']), zorder=100)
+dots = plt.scatter(x=peaks_summary_df['pct_death'], 
+                   y=peaks_summary_df['fitted'],
+                   c=peaks_summary_df['members'], alpha=0.5,
+                   s=np.log(0.1 * peaks_summary_df['members']) / np.log(1.03), 
+                   cmap=plt.cm.plasma,
+                   zorder=100)
 plt.colorbar(label="Количество восходящих")
 plt.axline([0, 0], [1, 1], ls='--', lw=1, c='firebrick')
 plt.grid(ls='--')
 plt.xlim(-0.005, 0.145)
 plt.ylim(0, 0.06)
+plt.title('Смертность Гималайских гор')
 plt.xlabel("Смертность, наблюдаемая")
 plt.ylabel("Смертность, адаптированная по Байесовой модели")
+plt.legend(*dots.legend_elements('sizes', num=[100, 1000, 15000], 
+                                 func=lambda x: 10*np.power(1.03, x)))
 ax = plt.gca()
 ax.xaxis.set_major_formatter(PercentFormatter(1))
 ax.yaxis.set_major_formatter(PercentFormatter(1))
@@ -205,9 +223,13 @@ plt.show()
 
 ## Исследуем Эверест
 
+
+Подъёмы на Эверест наиболее популярны среди альпинистов.
+
 ```{python}
 everest_df = expeditions_df.loc[expeditions_df['peak_name'] == 'Everest']
 success_df = expeditions_df.loc[expeditions_df['success'] == 'Success']
+print("Количество восхождений на Эверест: {}".format(len(everest_df)))
 ```
 
 ```{python}
@@ -289,7 +311,6 @@ by_age_df = members_everest_df.set_index('age').groupby(by=lambda x: (x//10)*10)
     columns={'expedition_id': 'n_climb',
              'died': 'pct_death'})
 by_age_df.index.name = 'age'
-by_age_df
 ```
 
 ```{python}
