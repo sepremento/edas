@@ -27,6 +27,7 @@ import re
 import pickle
 from bs4 import BeautifulSoup
 from itertools import combinations
+from requests.exceptions import HTTPError, MissingSchema
 
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import ShuffleSplit
@@ -49,6 +50,7 @@ if os.path.exists('ramen_reviews.json'):
 ```
 
 ## Извлечение данных
+К сожалению авторы датасета изменили структуру поставки данных и нет теперь большой таблицы со ссылками на все обзоры. К этому документу прилагается файл `ramen_reviews.json`, который был создан во время парсинга сайта и обработка информации в разделе [обработка](#process) будет производиться с его использованием.
 
 ```{python}
 # Достаём список ссылок
@@ -63,13 +65,13 @@ for link_tag in links_taglist:
 
 Получим все отзывы, какие удастся.
 
-```{python jupyter={'outputs_hidden': True}}
+```{python}
 session = requests.Session()
 paragraphs_list = []
 for link in links_list:
     try:
         resp = session.get(link)
-        print("Обрабатываю: {}".format(link))
+        # print("Обрабатываю: {}".format(link))
         soup = BeautifulSoup(resp.content, 'html.parser')
         title = soup.select('.entry-title')
         paragraphs = soup.select('.entry-content > p')
@@ -146,7 +148,7 @@ with open('ramen_reviews.json', 'w') as f:
     json.dump(review_dict, f)
 ```
 
-## Обработка
+## <span id="process">Обработка</span>
 
 ```{python}
 top_20_brands = review_df['Brand'].value_counts()[:20].index.to_list()
