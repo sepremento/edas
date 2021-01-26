@@ -6,7 +6,7 @@ and view/edit them.
 `drafts/` directory contains version controlled `.Rmd` files to process and
 edit. Root directory contains or will contain finalized `.ipynb` versions of
 EDAs. It's best to view them via
-[nbviewer](https://nbviewer.jupyter.org/github/sepremento/edas/tree/master/)
+[nbviewer](https://nbviewer.jupyter.org/github/sepremento/edas/tree/main/)
 
 ---
 
@@ -18,4 +18,4 @@ EDAs. It's best to view them via
 В папке `drafts/` находятся черновики в формате `.Rmd`, которые удобно
 использовать в системах контроля версий. Законченные виды анализа находятся в
 корневой директории и их удобно просматривать с помощью сервиса
-[nbviewer](https://nbviewer.jupyter.org/github/sepremento/edas/tree/master/)
+[nbviewer](https://nbviewer.jupyter.org/github/sepremento/edas/tree/main/)
